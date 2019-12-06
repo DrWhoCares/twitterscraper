@@ -5,7 +5,9 @@ import csv
 import json
 import argparse
 import collections
+import requests
 import datetime as dt
+import os
 from os.path import isfile
 from pprint import pprint
 from twitterscraper.query import query_tweets
@@ -91,6 +93,12 @@ def main():
         parser.add_argument("-p", "--poolsize", type=int, default=20, help="Specify the number of parallel process you want to run. \n"
                             "Default value is set to 20. \nYou can change this number if you have more computing power available. \n"
                             "Set to 1 if you dont want to run any parallel processes.", metavar='\b')
+        parser.add_argument("-i", "--images", action="store_true",
+                            help="Set this flag if you want to download all images from the query.")
+        parser.add_argument("-io", "--imagesoutput", type=str, default="./",
+                            help="The path to the folder to download all of the images to, using -i.")
+        parser.add_argument("-ex", "--onlymedia", action="store_true",
+                            help="Set this flag if you want exclude tweets without media.")
         args = parser.parse_args()
 
         if isfile(args.output) and not args.dump and not args.overwrite:
@@ -101,12 +109,12 @@ def main():
             args.begindate = dt.date(2006,3,1)
 
         if args.user:
-            tweets = query_tweets_from_user(user = args.query, limit = args.limit)
+            tweets = query_tweets_from_user(user = args.query, limit = args.limit, dl_imgs = args.onlymedia)
         else:
             tweets = query_tweets(query = args.query, limit = args.limit,
                               begindate = args.begindate, enddate = args.enddate,
-                              poolsize = args.poolsize, lang = args.lang)
-
+                              poolsize = args.poolsize, lang = args.lang, dl_imgs = args.onlymedia)
+        
         if args.dump:
             pprint([tweet.__dict__ for tweet in tweets])
         else:
@@ -132,13 +140,73 @@ def main():
                                 t.is_replied, t.is_reply_to, t.parent_tweet_id,
                                 t.reply_to_users
                             ])
+                            
+                        if args.images:
+                            if args.user:
+                                download_all_images(tweets, args.imagesoutput, username=args.query)
+                            else:
+                                download_all_images(tweets, args.imagesoutput)
                     else:
+                        if args.images:
+                            if args.user:
+                                download_all_images(tweets, args.imagesoutput, username=args.query)
+                            else:
+                                download_all_images(tweets, args.imagesoutput)
                         json.dump(tweets, output, cls=JSONEncoder)
             if args.profiles and tweets:
                 list_users = list(set([tweet.username for tweet in tweets]))
                 list_users_info = [query_user_info(elem) for elem in list_users]
                 filename = 'userprofiles_' + args.output
+                
+                if args.images:
+                    download_all_images(list_users_info, args.imagesoutput)
+                
                 with open(filename, "w", encoding="utf-8") as output:
                     json.dump(list_users_info, output, cls=JSONEncoder)
     except KeyboardInterrupt:
         logger.info("Program interrupted by user. Quitting...")
+
+def download_all_images(tweets, output_path, username=None, size="orig"):
+    if username:
+        root_dir = os.path.join(output_path or '', username)
+        create_directory(root_dir)
+
+    for t in tweets: 
+        for img_url in t.img_urls:
+            date = dt.datetime.fromtimestamp(t.timestamp_epochs)
+            
+            if not username:
+                root_dir = os.path.join(output_path or '', t.screen_name)
+                create_directory(root_dir)
+                
+            final_path = root_dir
+            # Create Subfolders for Years and Months
+            final_path = os.path.join(final_path, date.strftime("%Y"))
+            create_directory(final_path)
+            final_path = os.path.join(final_path, date.strftime("%m"))
+            create_directory(final_path)
+            
+            #if is_retweet:
+                # Create Subfolder to separate any Retweets
+                #final_path = os.path.join(final_path, "Retweets")
+                #create_directory(final_path)
+            
+            timestamp = date.strftime("%Y-%m-%d_") + size + "_"
+            
+            #if is_retweet:
+                #timestamp = "RT_" + timestamp
+                
+            filepath = os.path.join(final_path, timestamp + os.path.basename(img_url))
+            
+            r = requests.get(img_url + ':' + size, stream=True)
+            base_name = timestamp + os.path.basename(img_url)
+            filename = os.path.join(final_path or '', base_name)
+                        
+            with open(filename, 'wb') as fd:
+                for chunk in r.iter_content(chunk_size=1024):
+                    fd.write(chunk)
+            logger.info(filename)
+
+def create_directory(dir):
+    if not os.path.exists(dir):
+        os.makedirs(dir)

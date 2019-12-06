@@ -73,7 +73,7 @@ def linspace(start, stop, n):
 proxies = get_proxies()
 proxy_pool = cycle(proxies)
 
-def query_single_page(query, lang, pos, retry=50, from_user=False, timeout=60):
+def query_single_page(query, lang, pos, retry=50, from_user=False, timeout=60, dl_imgs=False):
     """
     Returns tweets from the given URL.
 
@@ -117,10 +117,13 @@ def query_single_page(query, lang, pos, retry=50, from_user=False, timeout=60):
                 pass
             if retry > 0:
                 logger.info('Retrying... (Attempts left: {})'.format(retry))
-                return query_single_page(query, lang, pos, retry - 1, from_user)
+                return query_single_page(query, lang, pos, retry - 1, from_user, dl_imgs=dl_imgs)
             else:
                 return [], pos
-
+        
+        if tweets and dl_imgs:
+            tweets = [t for t in tweets if t.has_media]
+        
         if json_resp:
             return tweets, urllib.parse.quote(json_resp['min_position'])
         if from_user:
@@ -142,13 +145,13 @@ def query_single_page(query, lang, pos, retry=50, from_user=False, timeout=60):
 
     if retry > 0:
         logger.info('Retrying... (Attempts left: {})'.format(retry))
-        return query_single_page(query, lang, pos, retry - 1)
+        return query_single_page(query, lang, pos, retry - 1, dl_imgs=dl_imgs)
 
     logger.error('Giving up.')
     return [], None
 
 
-def query_tweets_once_generator(query, limit=None, lang='', pos=None):
+def query_tweets_once_generator(query, limit=None, lang='', pos=None, dl_imgs=False):
     """
     Queries twitter for all the tweets you want! It will load all pages it gets
     from twitter. However, twitter might out of a sudden stop serving new pages,
@@ -170,7 +173,7 @@ def query_tweets_once_generator(query, limit=None, lang='', pos=None):
     num_tweets = 0
     try:
         while True:
-            new_tweets, new_pos = query_single_page(query, lang, pos)
+            new_tweets, new_pos = query_single_page(query, lang, pos, dl_imgs)
             if len(new_tweets) == 0:
                 logger.info('Got {} tweets for {}.'.format(
                     num_tweets, query))
@@ -208,7 +211,7 @@ def query_tweets_once(*args, **kwargs):
         return []
 
 
-def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.date.today(), poolsize=20, lang=''):
+def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.date.today(), poolsize=20, lang='', dl_imgs=False):
     no_days = (enddate - begindate).days
     
     if(no_days < 0):
@@ -233,7 +236,7 @@ def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.d
         pool = Pool(poolsize)
         logger.info('queries: {}'.format(queries))
         try:
-            for new_tweets in pool.imap_unordered(partial(query_tweets_once, limit=limit_per_pool, lang=lang), queries):
+            for new_tweets in pool.imap_unordered(partial(query_tweets_once, limit=limit_per_pool, lang=lang, dl_imgs=dl_imgs), queries):
                 all_tweets.extend(new_tweets)
                 logger.info('Got {} tweets ({} new).'.format(
                     len(all_tweets), len(new_tweets)))
@@ -247,12 +250,12 @@ def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.d
     return all_tweets
 
 
-def query_tweets_from_user(user, limit=None):
+def query_tweets_from_user(user, limit=None, dl_imgs=False):
     pos = None
     tweets = []
     try:
         while True:
-           new_tweets, pos = query_single_page(user, lang='', pos=pos, from_user=True)
+           new_tweets, pos = query_single_page(user, lang='', pos=pos, from_user=True, dl_imgs=dl_imgs)
            if len(new_tweets) == 0:
                logger.info("Got {} tweets from username {}".format(len(tweets), user))
                return tweets
